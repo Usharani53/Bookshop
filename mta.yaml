@@ -1,0 +1,139 @@
+_schema-version: "3.1"
+ID: Bookshop
+description: A simple CAP project.
+version: 1.0.0
+modules:
+- name: Bookshop-srv
+  type: nodejs
+  path: gen/srv
+  requires:
+  - name: Bookshop-auth
+  - name: uaa_Bookshop
+  - name: Bookshop-db
+  provides:
+  - name: srv-api
+    properties:
+      srv-url: ${default-url}
+  parameters:
+    buildpack: nodejs_buildpack
+  build-parameters:
+    builder: npm
+- name: Bookshop-destination-content
+  type: com.sap.application.content
+  requires:
+  - name: Bookshop-destination-service
+    parameters:
+      content-target: true
+  - name: Bookshop_html_repo_host
+    parameters:
+      service-key:
+        name: Bookshop_html_repo_host-key
+  - name: uaa_Bookshop
+    parameters:
+      service-key:
+        name: uaa_Bookshop-key
+  parameters:
+    content:
+      instance:
+        destinations:
+        - Name: managedRouter_Bookshop_html_repo_host
+          ServiceInstanceName: Bookshop-html5-app-host-service
+          ServiceKeyName: Bookshop_html_repo_host-key
+          sap.cloud.service: managedRouter
+        - Authentication: OAuth2UserTokenExchange
+          Name: managedRouter_uaa_Bookshop
+          ServiceInstanceName: Bookshop-xsuaa-service
+          ServiceKeyName: uaa_Bookshop-key
+          sap.cloud.service: managedRouter
+        existing_destinations_policy: ignore
+  build-parameters:
+    no-source: true
+- name: Bookshop-db-deployer
+  type: hdb
+  path: gen/db
+  requires:
+  - name: Bookshop-db
+  parameters:
+    buildpack: nodejs_buildpack
+- name: Bookshop-app-content
+  type: com.sap.application.content
+  path: .
+  requires:
+  - name: Bookshop_html_repo_host
+    parameters:
+      content-target: true
+  build-parameters:
+    build-result: resources
+    requires:
+    - artifacts:
+      - sapcomproject1.zip
+      name: sapcomproject1
+      target-path: resources/
+- name: sapcomproject1
+  type: html5
+  path: app/project1
+  build-parameters:
+    build-result: dist
+    builder: custom
+    commands:
+    - npm install
+    - npm run build:cf
+    supported-platforms: []
+resources:
+- name: Bookshop-destination-service
+  type: org.cloudfoundry.managed-service
+  parameters:
+    config:
+      HTML5Runtime_enabled: true
+      init_data:
+        instance:
+          destinations:
+          - Authentication: NoAuthentication
+            Name: ui5
+            ProxyType: Internet
+            Type: HTTP
+            URL: https://ui5.sap.com
+          - Authentication: NoAuthentication
+            HTML5.DynamicDestination: true
+            HTML5.ForwardAuthToken: true
+            Name: Bookshop-srv-api
+            ProxyType: Internet
+            Type: HTTP
+            URL: ~{srv-api/srv-url}
+          existing_destinations_policy: update
+      version: 1.0.0
+    service: destination
+    service-name: Bookshop-destination-service
+    service-plan: lite
+  requires:
+  - name: srv-api
+- name: Bookshop_html_repo_host
+  type: org.cloudfoundry.managed-service
+  parameters:
+    service: html5-apps-repo
+    service-name: Bookshop-html5-app-host-service
+    service-plan: app-host
+- name: uaa_Bookshop
+  type: org.cloudfoundry.managed-service
+  parameters:
+    config:
+      tenant-mode: dedicated
+      xsappname: Bookshop-${org}-${space}
+    path: ./xs-security.json
+    service: xsuaa
+    service-name: Bookshop-xsuaa-service
+    service-plan: application
+- name: Bookshop-db
+  type: com.sap.xs.hdi-container
+  parameters:
+    service: hana
+    service-plan: hdi-shared
+parameters:
+  deploy_mode: html5-repo
+  enable-parallel-deployments: true
+build-parameters:
+  before-all:
+  - builder: custom
+    commands:
+    - npm ci
+    - npx cds build --production
